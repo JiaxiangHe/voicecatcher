@@ -1,7 +1,7 @@
 # voicecatcher
 real time pitch detector by webRTC and AudioContext
 
-![](https://github.com/JiaxiangHe/voicecatcher/raw/master/public/foryou.gif "sample")
+![](https://github.com/JiaxiangHe/voicecatcher/raw/master/public/sample.jpg "sample")
 
 It's easy to catch users' voice throght webRTC in browser and do something interesting with AudioContext.
 
