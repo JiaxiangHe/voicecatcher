@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>voice catcher</title>
+		<style>
+			#bar {
+				margin-top: 20px;
+				width: 100%;
+				height: 300px;
+				-webkit-transition: 0.1s ease all;
+				white-space: nowrap;
+				overflow: visible;
+			}
+
+			.bar-item {
+				background-color: green;
+				height: 0px;
+				width: 10px;
+				float: left;
+			}
+
+		</style>
+	</head>
+
+	<body>
+		<h1>Pitch Detector</h1>
+		<div>
+			<audio></audio>
+			<button id='start'>Start</button>
+		</div>
+		<div id="bar">
+		</div>
+		<p class="frequency"></p>
+		<p class="pitch"></p>
+
+		<script>
+			// initialize webRTC
+			window.AudioContext = window.AudioContext || window.webkitAudioContext;
+			function getUserMedia(obj, sucCallback, failCallback) {
+				try {
+					if(navigator.mediaDevices.getUserMedia) {
+						var media = navigator.mediaDevices.getUserMedia(obj);
+						media.then(sucCallback);
+						media.catch(failCallback);
+					}else {
+						navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+						return navigator.getUserMedia(obj, sucCallback, failCallback);
+					}
+				}catch(e) {
+					console.error(e);
+					alert('your browser not support')
+				}
+			}
+
+			if (!window.requestAnimationFrame)
+				window.requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
+
+			window.onload = function () {
+				audioCtx = new AudioContext();
+				analyser = audioCtx.createAnalyser();
+				var audio = document.querySelector('audio');
+				var button = document.querySelector('button');
+				var feqSpan = document.querySelector('.frequency');
+				var pitchSpan = document.querySelector('.pitch');
+				var barContainer = document.querySelector('#bar');
+				var barLen = 64;
+				for(var i = 0; i < barLen; i++) {
+					var tmp = document.createElement('div');
+					tmp.className = 'bar-item';
+					barContainer.appendChild(tmp);
+				}
+				var bar = document.querySelectorAll('.bar-item');
+
+				button.onclick = function() {
+					getUserMedia({audio: true}, function(mediaStream) {
+						// play back
+						audio.src = window.URL.createObjectURL(mediaStream);
+						audio.onloadedmetadata = function(e) {
+							audio.play();
+							audio.muted = true;
+						};
+
+						// Create a MediaStreamAudioSourceNode
+						// Feed with the HTMLMediaElement into it
+						var source = audioCtx.createMediaStreamSource(mediaStream);
+						source.connect(analyser);
+						analyser.connect(audioCtx.destination);
+						analyser.fftSize = 2048;
+
+						// frequency-domain array
+						var frequencyData = new Uint8Array(analyser.frequencyBinCount);
+						function feqDomain() {
+							// draw frequency-domain
+							analyser.getByteFrequencyData(frequencyData);
+							for(var i = 0; i < bar.length; i++) {
+								bar[i].style.height = ((frequencyData[Math.floor(i * analyser.frequencyBinCount / bar.length)] * 100) / 256) + "%";
+							}
+							window.requestAnimationFrame(feqDomain);
+						}
+						feqDomain();
+
+						// calculate best pitch from https://github.com/cwilso/PitchDetect/blob/master/js/pitchdetect.js
+						var noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+						var MIN_SAMPLES = 0;  // will be initialized when AudioContext is created.
+						var GOOD_ENOUGH_CORRELATION = 0.9; // this is the "bar" for how close a correlation needs to be
+						function autoCorrelate( buf, sampleRate ) {
+							var SIZE = buf.length;
+							var MAX_SAMPLES = Math.floor(SIZE/2);
+							var best_offset = -1;
+							var best_correlation = 0;
+							var rms = 0;
+							var foundGoodCorrelation = false;
+							var correlations = new Array(MAX_SAMPLES);
+
+							for (var i=0;i<SIZE;i++) {
+								var val = buf[i];
+								rms += val*val;
+							}
+							rms = Math.sqrt(rms/SIZE);
+							if (rms<0.01) // not enough signal
+								return -1;
+
+							var lastCorrelation=1;
+							for (var offset = MIN_SAMPLES; offset < MAX_SAMPLES; offset++) {
+								var correlation = 0;
+
+								for (var i=0; i<MAX_SAMPLES; i++) {
+									correlation += Math.abs((buf[i])-(buf[i+offset]));
+								}
+								correlation = 1 - (correlation/MAX_SAMPLES);
+								correlations[offset] = correlation; // store it, for the tweaking we need to do below.
+								if ((correlation>GOOD_ENOUGH_CORRELATION) && (correlation > lastCorrelation)) {
+									foundGoodCorrelation = true;
+									if (correlation > best_correlation) {
+										best_correlation = correlation;
+										best_offset = offset;
+									}
+								} else if (foundGoodCorrelation) {
+									// short-circuit - we found a good correlation, then a bad one, so we'd just be seeing copies from here.
+									// Now we need to tweak the offset - by interpolating between the values to the left and right of the
+									// best offset, and shifting it a bit.  This is complex, and HACKY in this code (happy to take PRs!) -
+									// we need to do a curve fit on correlations[] around best_offset in order to better determine precise
+									// (anti-aliased) offset.
+
+									// we know best_offset >=1, 
+									// since foundGoodCorrelation cannot go to true until the second pass (offset=1), and 
+									// we can't drop into this clause until the following pass (else if).
+									var shift = (correlations[best_offset+1] - correlations[best_offset-1])/correlations[best_offset];  
+									return sampleRate/(best_offset+(8*shift));
+								}
+								lastCorrelation = correlation;
+							}
+							if (best_correlation > 0.01) {
+								// console.log("f = " + sampleRate/best_offset + "Hz (rms: " + rms + " confidence: " + best_correlation + ")")
+								return sampleRate/best_offset;
+							}
+							return -1;
+							//	var best_frequency = sampleRate/best_offset;
+						}
+						function noteFromPitch( frequency ) {
+							var noteNum = 12 * (Math.log( frequency / 440 )/Math.log(2) );
+							return Math.round( noteNum ) + 69;
+						}
+
+						// time-dowm array
+						var timeData = new Float32Array(analyser.frequencyBinCount);
+						function calPitch() {
+							analyser.getFloatTimeDomainData(timeData);
+							var feq = autoCorrelate(timeData, audioCtx.sampleRate);
+							feqSpan.innerHTML = feq;
+							if(feq !== -1) {
+								pitchSpan.innerHTML = noteStrings[noteFromPitch(feq) % 12];
+							}else {
+								pitchSpan.innerHTML = '--';
+							}
+							window.requestAnimationFrame(calPitch);
+						}
+						calPitch();
+					},
+					function(err) {
+						console.log(err); 
+					});
+				}
+			};
+		</script>
+	</body>
+</html>
