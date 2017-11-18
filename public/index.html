@@ -27,6 +27,7 @@
 		<div>
 			<audio></audio>
 			<button id='start'>Start</button>
+			<button id='stop'>Stop</button>
 		</div>
 		<div id="bar">
 		</div>
@@ -59,7 +60,9 @@
 				audioCtx = new AudioContext();
 				analyser = audioCtx.createAnalyser();
 				var audio = document.querySelector('audio');
-				var button = document.querySelector('button');
+				var tracks = null;
+				var button = document.querySelector('button#start');
+				var stop = document.querySelector('button#stop');
 				var feqSpan = document.querySelector('.frequency');
 				var pitchSpan = document.querySelector('.pitch');
 				var barContainer = document.querySelector('#bar');
@@ -71,14 +74,17 @@
 				}
 				var bar = document.querySelectorAll('.bar-item');
 
+				stop.onclick = function() {
+					tracks.map(function(track) {
+						track.stop();
+					});
+				}
 				button.onclick = function() {
 					getUserMedia({audio: true}, function(mediaStream) {
 						// play back
+						tracks = mediaStream.getAudioTracks();
+						audio.muted = true;
 						audio.src = window.URL.createObjectURL(mediaStream);
-						audio.onloadedmetadata = function(e) {
-							audio.play();
-							audio.muted = true;
-						};
 
 						// Create a MediaStreamAudioSourceNode
 						// Feed with the HTMLMediaElement into it
