@@ -46,7 +46,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Pets"
+                  "anyOf": {
+                    "$ref": "#/components/schemas/Pets"
+                  }
                 }
               }
             }
